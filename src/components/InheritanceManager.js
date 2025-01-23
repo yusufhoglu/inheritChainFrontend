@@ -21,20 +21,23 @@ import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
 import InheritanceManagerABI from '../artifacts/contracts/InheritanceManager.sol/InheritanceManager.json';
 
 const InheritanceManager = () => {
-    const [account, setAccount] = useState(null);
+    const [loading, setLoading] = useState(false);
     const [contract, setContract] = useState(null);
+    const [account, setAccount] = useState(null);
     const [beneficiaryAddress, setBeneficiaryAddress] = useState('');
     const [beneficiaryShare, setBeneficiaryShare] = useState('');
     const [validatorAddress, setValidatorAddress] = useState('');
-    const [loading, setLoading] = useState(false);
     const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
     const [hasInheritance, setHasInheritance] = useState(false);
     const [transactionPending, setTransactionPending] = useState(false);
     const [inheritanceDetails, setInheritanceDetails] = useState({
         beneficiaries: [],
         validators: [],
-        requiredConfirmations: 0
+        requiredConfirmations: "0"
     });
+    const [requiredConfirmations, setRequiredConfirmations] = useState(1);
+
+    const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // Kontrat adresinizi buraya yazın
 
     const showSnackbar = (message, severity = 'success') => {
         setSnackbar({ open: true, message, severity });
@@ -44,113 +47,268 @@ const InheritanceManager = () => {
         setSnackbar({ ...snackbar, open: false });
     };
 
-    const connectWallet = async () => {
-        if (typeof window.ethereum !== 'undefined') {
-            try {
-                setLoading(true);
-                
-                // Doğru chain ID'ye geçiş yap
-                try {
-                    await window.ethereum.request({
-                        method: 'wallet_switchEthereumChain',
-                        params: [{ chainId: '0x539' }], // 1337 decimal = 0x539 hex
-                    });
-                } catch (switchError) {
-                    // Ağ bulunamadıysa ekle
-                    if (switchError.code === 4902) {
-                        await window.ethereum.request({
-                            method: 'wallet_addEthereumChain',
-                            params: [{
-                                chainId: '0x539',
-                                chainName: 'Localhost 8545',
-                                nativeCurrency: {
-                                    name: 'ETH',
-                                    symbol: 'ETH',
-                                    decimals: 18
-                                },
-                                rpcUrls: ['http://127.0.0.1:8545']
-                            }]
-                        });
-                    }
-                }
-                
-                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-                setAccount(accounts[0]);
-                
-                const provider = new ethers.providers.Web3Provider(window.ethereum);
-                const signer = provider.getSigner();
-                
-                const contractAddress = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // Deploy edilen kontrat adresi
-                const contractInstance = new ethers.Contract(
-                    contractAddress,
-                    InheritanceManagerABI.abi,
-                    signer
-                );
-                
-                setContract(contractInstance);
-                showSnackbar('Cüzdan başarıyla bağlandı!');
-                await checkInheritance();
-            } catch (error) {
-                console.error("Bağlantı hatası:", error);
-                showSnackbar('Cüzdan bağlantısında hata: ' + error.message, 'error');
-            } finally {
-                setLoading(false);
-            }
+    const initContract = async (signer) => {
+        try {
+            return new ethers.Contract(
+                CONTRACT_ADDRESS,
+                InheritanceManagerABI.abi,
+                signer
+            );
+        } catch (error) {
+            console.error("Kontrat başlatma hatası:", error);
+            return null;
         }
     };
 
-    const checkInheritance = async () => {
+    const connectWallet = async () => {
         try {
-            if (contract && account) {
-                const inheritance = await contract.inheritances(account);
-                console.log("Miras durumu:", inheritance);
-                setHasInheritance(inheritance.isActive);
+            setLoading(true);
+            console.log("Cüzdan bağlanıyor...");
+            
+            const provider = new ethers.providers.Web3Provider(window.ethereum);
+            const accounts = await provider.send("eth_requestAccounts", []);
+            const currentAccount = accounts[0];
+            setAccount(currentAccount);
+            console.log("Bağlanan hesap:", currentAccount);
+            
+            const signer = provider.getSigner();
+            const contractInstance = await initContract(signer);
+            
+            setContract(contractInstance);
+            console.log("Kontrat bağlantısı kuruldu");
+            
+            await checkInheritance(contractInstance, currentAccount);
+        } catch (error) {
+            console.error("Bağlantı hatası:", error);
+            showSnackbar('Bağlantı hatası: ' + error.message, 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const checkInheritance = async (contractInstance, currentAccount) => {
+        try {
+            const contractToUse = contractInstance || contract;
+            const accountToUse = currentAccount || account;
+            
+            if (!contractToUse || !accountToUse) {
+                console.log("Kontrat veya hesap bulunamadı");
+                setHasInheritance(false);
+                return;
+            }
+
+            console.log("Miras planı kontrolü yapılıyor...");
+            console.log("Kontrat adresi:", contractToUse.address);
+            console.log("Hesap:", accountToUse);
+            
+            // Önce inheritance'ın varlığını kontrol edelim
+            const inheritance = await contractToUse.inheritances(accountToUse);
+            console.log("Miras planı durumu:", inheritance);
+            
+            if (inheritance && inheritance.isActive) {
+                console.log("Aktif miras planı bulundu");
+                setHasInheritance(true);
+                
+                // Detayları getir
+                const validatorCount = await contractToUse.getValidatorCount(accountToUse);
+                console.log("Doğrulayıcı sayısı:", validatorCount.toString());
+                
+                let validators = [];
+                for(let i = 0; i < validatorCount; i++) {
+                    const validatorAddress = await contractToUse.getValidator(accountToUse, i);
+                    const hasConfirmed = await contractToUse.getValidatorConfirmation(accountToUse, i);
+                    validators.push({
+                        address: validatorAddress,
+                        hasConfirmed
+                    });
+                }
+                
+                const beneficiaryCount = await contractToUse.getBeneficiaryCount(accountToUse);
+                let beneficiaries = [];
+                for(let i = 0; i < beneficiaryCount; i++) {
+                    const [address, share] = await contractToUse.getBeneficiary(accountToUse, i);
+                    beneficiaries.push({
+                        address,
+                        share: share.toString()
+                    });
+                }
+                
+                setInheritanceDetails({
+                    beneficiaries,
+                    validators,
+                    requiredConfirmations: validatorCount.toString()
+                });
+            } else {
+                console.log("Aktif miras planı bulunamadı");
+                setHasInheritance(false);
+                setInheritanceDetails({
+                    beneficiaries: [],
+                    validators: [],
+                    requiredConfirmations: "0"
+                });
             }
         } catch (error) {
             console.error("Miras planı kontrolünde hata:", error);
-            showSnackbar('Miras planı kontrolünde hata oluştu', 'error');
+            setHasInheritance(false);
+            setInheritanceDetails({
+                beneficiaries: [],
+                validators: [],
+                requiredConfirmations: "0"
+            });
         }
     };
 
     useEffect(() => {
-        if (window.ethereum) {
-            window.ethereum.on('accountsChanged', (accounts) => {
-                setAccount(accounts[0]);
-                checkInheritance();
-            });
-        }
-        return () => {
+        const init = async () => {
             if (window.ethereum) {
-                window.ethereum.removeListener('accountsChanged', () => {});
+                try {
+                    const provider = new ethers.providers.Web3Provider(window.ethereum);
+                    const accounts = await provider.send("eth_requestAccounts", []);
+                    const currentAccount = accounts[0];
+                    setAccount(currentAccount);
+                    
+                    const signer = provider.getSigner();
+                    const contractInstance = await initContract(signer);
+                    if (contractInstance) {
+                        setContract(contractInstance);
+                        await checkInheritance(contractInstance, currentAccount);
+                    }
+                } catch (error) {
+                    console.error("Başlangıç hatası:", error);
+                    showSnackbar('Bağlantı hatası: ' + error.message, 'error');
+                }
             }
         };
+        init();
     }, []);
 
+    useEffect(() => {
+        if (window.ethereum) {
+            const handleAccountsChanged = async (accounts) => {
+                try {
+                    const newAccount = accounts[0];
+                    console.log("Hesap değişti:", newAccount);
+                    setAccount(newAccount);
+                    
+                    const provider = new ethers.providers.Web3Provider(window.ethereum);
+                    const signer = provider.getSigner();
+                    
+                    // Yeni kontrat instance'ı oluştur
+                    const contractInstance = await initContract(signer);
+                    if (contractInstance) {
+                        setContract(contractInstance);
+                        // State'leri sıfırla
+                        setHasInheritance(false);
+                        setInheritanceDetails({
+                            beneficiaries: [],
+                            validators: [],
+                            requiredConfirmations: "0"
+                        });
+                        // Yeni hesap için miras planını kontrol et
+                        await checkInheritance(contractInstance, newAccount);
+                    }
+                } catch (error) {
+                    console.error("Hesap değişikliği hatası:", error);
+                    showSnackbar('Hesap değişikliği hatası: ' + error.message, 'error');
+                }
+            };
+
+            const handleChainChanged = () => {
+                // Sayfa yenilemek yerine state'leri sıfırlayalım
+                setContract(null);
+                setAccount(null);
+                setHasInheritance(false);
+                setInheritanceDetails({
+                    beneficiaries: [],
+                    validators: [],
+                    requiredConfirmations: "0"
+                });
+                // Yeniden başlat
+                window.location.reload();
+            };
+
+            window.ethereum.on('accountsChanged', handleAccountsChanged);
+            window.ethereum.on('chainChanged', handleChainChanged);
+
+            return () => {
+                window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
+                window.ethereum.removeListener('chainChanged', handleChainChanged);
+            };
+        }
+    }, []); // Dependency array'i boş bırakalım
+
+    useEffect(() => {
+        const checkStatus = async () => {
+            if (contract && account) {
+                await checkInheritance();
+            }
+        };
+        checkStatus();
+    }, [contract, account]);
+
     const createInheritance = async () => {
-        if (transactionPending) return;
-        
         try {
-            setTransactionPending(true);
+            if (!contract || !account) {
+                showSnackbar('Lütfen önce cüzdanınızı bağlayın!', 'warning');
+                return;
+            }
+
             setLoading(true);
-            
             console.log("Miras planı oluşturuluyor...");
-            const tx = await contract.createInheritance(2);
-            console.log("İşlem gönderildi:", tx.hash);
+            console.log("Gönderen hesap:", account);
             
+            // Gas estimate yapalım
+            const gasEstimate = await contract.estimateGas.createInheritance();
+            console.log("Tahmini gas:", gasEstimate.toString());
+            
+            // Gas limitini estimate'in 1.5 katı yapalım
+            const gasLimit = gasEstimate.mul(15).div(10);
+            console.log("Kullanılacak gas limit:", gasLimit.toString());
+            
+            const tx = await contract.createInheritance({
+                from: account,
+                gasLimit: gasLimit
+            });
+            
+            console.log("İşlem gönderildi:", tx.hash);
             showSnackbar('İşlem gönderildi, onay bekleniyor...', 'info');
             
-            await tx.wait();
-            console.log("İşlem onaylandı");
+            // Transaction receipt'i bekleyelim
+            console.log("Transaction receipt bekleniyor...");
+            const receipt = await tx.wait(1); // 1 onay bekleyelim
+            console.log("İşlem receipt:", receipt);
             
-            await checkInheritance();
-            
-            showSnackbar('Miras planı başarıyla oluşturuldu!', 'success');
+            if (receipt.status === 1) {
+                console.log("İşlem başarılı, blockchain güncellenmesi bekleniyor...");
+                // Blockchain'in güncellenmesi için biraz bekleyelim
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                
+                // Miras planını kontrol edelim
+                console.log("Miras planı kontrolü yapılıyor...");
+                await checkInheritance(contract, account);
+                
+                showSnackbar('Miras planı başarıyla oluşturuldu!', 'success');
+                console.log("İşlem tamamlandı");
+            } else {
+                console.error("İşlem başarısız");
+                showSnackbar('Miras planı oluşturulamadı!', 'error');
+            }
         } catch (error) {
             console.error("Miras planı oluşturma hatası:", error);
-            showSnackbar('Miras planı oluşturulamadı: ' + (error.message || 'Bilinmeyen hata'), 'error');
+            
+            // Hata mesajını daha detaylı analiz edelim
+            if (error.code === 'UNPREDICTABLE_GAS_LIMIT') {
+                showSnackbar('Gas limit hesaplanamadı. Lütfen tekrar deneyin.', 'error');
+            } else if (error.code === 'INSUFFICIENT_FUNDS') {
+                showSnackbar('Yetersiz bakiye!', 'error');
+            } else if (error.message.includes('Inheritance already exists')) {
+                showSnackbar('Zaten aktif bir miras planınız var!', 'error');
+                await checkInheritance(contract, account);
+            } else {
+                showSnackbar('Miras planı oluşturulamadı: ' + error.message, 'error');
+            }
         } finally {
             setLoading(false);
-            setTransactionPending(false);
         }
     };
 
@@ -203,23 +361,37 @@ const InheritanceManager = () => {
             }
 
             setLoading(true);
+            console.log("Doğrulayıcı ekleniyor:", validatorAddress);
+            console.log("Gönderen hesap:", account);
+            
             const tx = await contract.addValidator(validatorAddress, {
-                gasLimit: 1000000
+                gasLimit: 200000 // Manuel gas limit ekleyelim
             });
+            
             showSnackbar('Doğrulayıcı ekleniyor...', 'info');
             
+            console.log("İşlem gönderildi:", tx.hash);
             await tx.wait();
-            showSnackbar('Doğrulayıcı başarıyla eklendi!', 'success');
+            console.log("İşlem onaylandı");
             
             // Form alanını temizle
             setValidatorAddress('');
             
-            // Detayları güncelle
-            await fetchInheritanceDetails();
+            // Kısa bir gecikme ekleyelim
+            await new Promise(resolve => setTimeout(resolve, 1000));
             
+            // Detayları güncelle
+            await checkInheritance();
+            
+            showSnackbar('Doğrulayıcı başarıyla eklendi!', 'success');
         } catch (error) {
             console.error("Doğrulayıcı ekleme hatası:", error);
-            showSnackbar('Doğrulayıcı eklenemedi: ' + error.message, 'error');
+            if (error.message.includes('Inheritance not created')) {
+                showSnackbar('Önce miras planı oluşturmalısınız!', 'error');
+                setHasInheritance(false);
+            } else {
+                showSnackbar('Doğrulayıcı eklenemedi: ' + error.message, 'error');
+            }
         } finally {
             setLoading(false);
         }
