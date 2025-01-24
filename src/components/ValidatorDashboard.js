@@ -67,17 +67,19 @@ const ValidatorDashboard = () => {
       const validatorOf = await contractInstance.getValidatorInheritances(currentAccount);
       
       const validationPromises = validatorOf.map(async (ownerAddress) => {
-        const inheritance = await contractInstance.inheritances(ownerAddress);
+        const [isActive, isDead, confirmationCount, requiredConfirmations, distributed] = 
+          await contractInstance.getInheritanceStatus(ownerAddress);
         const validatorIndex = await contractInstance.getValidatorIndex(ownerAddress, currentAccount);
         const hasConfirmed = await contractInstance.getValidatorConfirmation(ownerAddress, validatorIndex);
         
         return {
           owner: ownerAddress,
-          isActive: inheritance.isActive,
-          isDead: inheritance.isDead,
+          isActive,
+          isDead,
           hasConfirmed,
-          confirmationCount: inheritance.confirmationCount.toString(),
-          requiredConfirmations: inheritance.requiredConfirmations.toString()
+          confirmationCount: confirmationCount.toString(),
+          requiredConfirmations: requiredConfirmations.toString(),
+          distributed
         };
       });
 
@@ -94,18 +96,37 @@ const ValidatorDashboard = () => {
   const confirmDeath = async (ownerAddress) => {
     try {
       setLoading(true);
+      console.log("Ölüm onayı gönderiliyor...", ownerAddress);
+      
+      // Kontrat bakiyesini kontrol et
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const balance = await provider.getBalance(contract.address);
+      console.log("Kontrat bakiyesi:", ethers.utils.formatEther(balance));
+
+      // Gas tahmini al
+      const gasEstimate = await contract.estimateGas.confirmDeath(ownerAddress);
+      console.log("Tahmini gas:", gasEstimate.toString());
+
       const tx = await contract.confirmDeath(ownerAddress, {
-        gasLimit: 200000
+        gasLimit: gasEstimate.mul(120).div(100), // %20 extra gas limiti
       });
       
-      showSnackbar('Ölüm onayı gönderiliyor...', 'info');
-      await tx.wait();
+      showSnackbar('İşlem gönderiliyor...', 'info');
+      console.log("Transaction hash:", tx.hash);
+      
+      const receipt = await tx.wait();
+      console.log("Transaction receipt:", receipt);
       
       await fetchValidations(contract, account);
       showSnackbar('Ölüm onayı başarıyla gönderildi', 'success');
     } catch (error) {
       console.error("Ölüm onayı hatası:", error);
-      showSnackbar('Ölüm onayı gönderilemedi: ' + error.message, 'error');
+      // Daha detaylı hata mesajı
+      let errorMessage = error.message;
+      if (error.error && error.error.message) {
+        errorMessage = error.error.message;
+      }
+      showSnackbar('Ölüm onayı gönderilemedi: ' + errorMessage, 'error');
     } finally {
       setLoading(false);
     }
@@ -167,6 +188,8 @@ const ValidatorDashboard = () => {
                                 Durum: {validation.isDead ? 'Ölüm Onaylandı' : 'Aktif'}
                                 <br />
                                 Onay Durumu: {validation.confirmationCount} / {validation.requiredConfirmations}
+                                <br />
+                                Miras Durumu: {validation.distributed ? 'Dağıtıldı' : 'Dağıtılmadı'}
                               </Typography>
                             </>
                           }
