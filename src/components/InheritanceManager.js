@@ -13,7 +13,10 @@ import {
   Toolbar,
   Snackbar,
   Alert,
-  CircularProgress
+  CircularProgress,
+  List,
+  ListItem,
+  ListItemText
 } from '@mui/material';
 import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
@@ -25,6 +28,7 @@ const InheritanceManager = () => {
     const [contract, setContract] = useState(null);
     const [account, setAccount] = useState(null);
     const [beneficiaryAddress, setBeneficiaryAddress] = useState('');
+    const [beneficiaryAmount, setBeneficiaryAmount] = useState('');
     const [beneficiaryShare, setBeneficiaryShare] = useState('');
     const [validatorAddress, setValidatorAddress] = useState('');
     const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -36,8 +40,10 @@ const InheritanceManager = () => {
         requiredConfirmations: "0"
     });
     const [requiredConfirmations, setRequiredConfirmations] = useState(1);
+    const [totalAmount, setTotalAmount] = useState("0");
+    const [beneficiaries, setBeneficiaries] = useState([]);
 
-    const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // Kontrat adresinizi buraya yazın
+    const CONTRACT_ADDRESS = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"; // Kontrat adresinizi buraya yazın
 
     const showSnackbar = (message, severity = 'success') => {
         setSnackbar({ open: true, message, severity });
@@ -101,60 +107,54 @@ const InheritanceManager = () => {
             console.log("Kontrat adresi:", contractToUse.address);
             console.log("Hesap:", accountToUse);
             
-            // Önce inheritance'ın varlığını kontrol edelim
-            const inheritance = await contractToUse.inheritances(accountToUse);
-            console.log("Miras planı durumu:", inheritance);
-            
-            if (inheritance && inheritance.isActive) {
-                console.log("Aktif miras planı bulundu");
-                setHasInheritance(true);
-                
-                // Detayları getir
-                const validatorCount = await contractToUse.getValidatorCount(accountToUse);
-                console.log("Doğrulayıcı sayısı:", validatorCount.toString());
-                
-                let validators = [];
-                for(let i = 0; i < validatorCount; i++) {
-                    const validatorAddress = await contractToUse.getValidator(accountToUse, i);
-                    const hasConfirmed = await contractToUse.getValidatorConfirmation(accountToUse, i);
-                    validators.push({
-                        address: validatorAddress,
-                        hasConfirmed
-                    });
-                }
-                
-                const beneficiaryCount = await contractToUse.getBeneficiaryCount(accountToUse);
-                let beneficiaries = [];
-                for(let i = 0; i < beneficiaryCount; i++) {
-                    const [address, share] = await contractToUse.getBeneficiary(accountToUse, i);
-                    beneficiaries.push({
-                        address,
-                        share: share.toString()
-                    });
-                }
-                
-                setInheritanceDetails({
-                    beneficiaries,
-                    validators,
-                    requiredConfirmations: validatorCount.toString()
-                });
-            } else {
-                console.log("Aktif miras planı bulunamadı");
+            // Önce try-catch ile kontrol edelim
+            try {
+                // Direkt kontrat çağrısı yapalım
+                const tx = await contractToUse.callStatic.createInheritance();
+                console.log("Miras planı yok");
                 setHasInheritance(false);
-                setInheritanceDetails({
-                    beneficiaries: [],
-                    validators: [],
-                    requiredConfirmations: "0"
-                });
+            } catch (error) {
+                if (error.message.includes('Inheritance already exists')) {
+                    console.log("Miras planı var");
+                    setHasInheritance(true);
+                    
+                    // Detayları getir
+                    const validatorCount = await contractToUse.getValidatorCount(accountToUse);
+                    console.log("Doğrulayıcı sayısı:", validatorCount.toString());
+                    
+                    let validators = [];
+                    for(let i = 0; i < validatorCount; i++) {
+                        const validatorAddress = await contractToUse.getValidator(accountToUse, i);
+                        const hasConfirmed = await contractToUse.getValidatorConfirmation(accountToUse, i);
+                        validators.push({
+                            address: validatorAddress,
+                            hasConfirmed
+                        });
+                    }
+                    
+                    const beneficiaryCount = await contractToUse.getBeneficiaryCount(accountToUse);
+                    let beneficiaries = [];
+                    for(let i = 0; i < beneficiaryCount; i++) {
+                        const [address, share] = await contractToUse.getBeneficiary(accountToUse, i);
+                        beneficiaries.push({
+                            address,
+                            share: share.toString()
+                        });
+                    }
+                    
+                    setInheritanceDetails({
+                        beneficiaries,
+                        validators,
+                        requiredConfirmations: validatorCount.toString()
+                    });
+                } else {
+                    console.log("Miras planı yok");
+                    setHasInheritance(false);
+                }
             }
         } catch (error) {
             console.error("Miras planı kontrolünde hata:", error);
             setHasInheritance(false);
-            setInheritanceDetails({
-                beneficiaries: [],
-                validators: [],
-                requiredConfirmations: "0"
-            });
         }
     };
 
@@ -257,53 +257,37 @@ const InheritanceManager = () => {
             console.log("Miras planı oluşturuluyor...");
             console.log("Gönderen hesap:", account);
             
-            // Gas estimate yapalım
-            const gasEstimate = await contract.estimateGas.createInheritance();
-            console.log("Tahmini gas:", gasEstimate.toString());
-            
-            // Gas limitini estimate'in 1.5 katı yapalım
-            const gasLimit = gasEstimate.mul(15).div(10);
-            console.log("Kullanılacak gas limit:", gasLimit.toString());
-            
+            // Gas limitini artıralım
             const tx = await contract.createInheritance({
                 from: account,
-                gasLimit: gasLimit
+                gasLimit: 500000
             });
             
             console.log("İşlem gönderildi:", tx.hash);
-            showSnackbar('İşlem gönderildi, onay bekleniyor...', 'info');
+            showSnackbar('Miras planı oluşturuluyor...', 'info');
             
             // Transaction receipt'i bekleyelim
-            console.log("Transaction receipt bekleniyor...");
-            const receipt = await tx.wait(1); // 1 onay bekleyelim
+            const receipt = await tx.wait();
             console.log("İşlem receipt:", receipt);
             
             if (receipt.status === 1) {
-                console.log("İşlem başarılı, blockchain güncellenmesi bekleniyor...");
-                // Blockchain'in güncellenmesi için biraz bekleyelim
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                console.log("İşlem başarılı");
+                
+                // Kısa bir gecikme ekleyelim
+                await new Promise(resolve => setTimeout(resolve, 2000));
                 
                 // Miras planını kontrol edelim
-                console.log("Miras planı kontrolü yapılıyor...");
-                await checkInheritance(contract, account);
-                
+                await checkInheritance();
                 showSnackbar('Miras planı başarıyla oluşturuldu!', 'success');
-                console.log("İşlem tamamlandı");
             } else {
                 console.error("İşlem başarısız");
                 showSnackbar('Miras planı oluşturulamadı!', 'error');
             }
         } catch (error) {
             console.error("Miras planı oluşturma hatası:", error);
-            
-            // Hata mesajını daha detaylı analiz edelim
-            if (error.code === 'UNPREDICTABLE_GAS_LIMIT') {
-                showSnackbar('Gas limit hesaplanamadı. Lütfen tekrar deneyin.', 'error');
-            } else if (error.code === 'INSUFFICIENT_FUNDS') {
-                showSnackbar('Yetersiz bakiye!', 'error');
-            } else if (error.message.includes('Inheritance already exists')) {
+            if (error.message.includes('Inheritance already exists')) {
                 showSnackbar('Zaten aktif bir miras planınız var!', 'error');
-                await checkInheritance(contract, account);
+                await checkInheritance();
             } else {
                 showSnackbar('Miras planı oluşturulamadı: ' + error.message, 'error');
             }
@@ -312,33 +296,65 @@ const InheritanceManager = () => {
         }
     };
 
+    // Miras miktarını artırmak için yeni fonksiyon
+    const addToInheritance = async () => {
+        try {
+            setLoading(true);
+            const amount = ethers.utils.parseEther("1.0"); // Örnek: 1 ETH
+            const tx = await contract.addToInheritance({ value: amount });
+            await tx.wait();
+            showSnackbar('Miras miktarı artırıldı', 'success');
+            await fetchInheritanceDetails();
+        } catch (error) {
+            console.error("Miras artırma hatası:", error);
+            showSnackbar('Miras miktarı artırılamadı: ' + error.message, 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const addBeneficiary = async () => {
         try {
-            if (!hasInheritance) {
-                showSnackbar('Önce miras planı oluşturmalısınız!', 'warning');
-                return;
-            }
+            setLoading(true);
             
-            if (!beneficiaryAddress || !beneficiaryShare) {
-                showSnackbar('Lütfen tüm alanları doldurun!', 'warning');
-                return;
+            // Input kontrolü
+            if (!beneficiaryAddress || !beneficiaryAmount) {
+                throw new Error('Tüm alanları doldurun');
             }
 
-            setLoading(true);
-            const tx = await contract.addBeneficiary(beneficiaryAddress, beneficiaryShare, {
-                gasLimit: 1000000
-            });
-            showSnackbar('Varis ekleniyor...', 'info');
+            // Amount değerini ETH'den Wei'ye çevirelim
+            const amountInWei = ethers.utils.parseEther(beneficiaryAmount.toString());
+            console.log('Gönderilecek miktar (Wei):', amountInWei.toString());
             
+            const tx = await contract.addBeneficiary(
+                beneficiaryAddress,
+                amountInWei,
+                {
+                    value: amountInWei, // ETH'yi direkt gönderiyoruz
+                    gasLimit: 300000
+                }
+            );
+            
+            showSnackbar('İşlem gönderiliyor...', 'info');
             await tx.wait();
-            showSnackbar('Varis başarıyla eklendi!', 'success');
+            
+            // Yeni varisi listeye ekle
+            setBeneficiaries([...beneficiaries, {
+                address: beneficiaryAddress,
+                amount: beneficiaryAmount
+            }]);
+            
+            // Toplam miktarı güncelle
+            const newTotal = ethers.utils.formatEther(
+                ethers.utils.parseEther(totalAmount).add(amountInWei)
+            );
+            setTotalAmount(newTotal);
+            
+            showSnackbar('Varis başarıyla eklendi ve ETH gönderildi', 'success');
             
             // Form alanlarını temizle
             setBeneficiaryAddress('');
-            setBeneficiaryShare('');
-            
-            // Detayları güncelle
-            await fetchInheritanceDetails();
+            setBeneficiaryAmount('');
             
         } catch (error) {
             console.error("Varis ekleme hatası:", error);
@@ -472,6 +488,35 @@ const InheritanceManager = () => {
         } catch (error) {
             console.error("İptal hatası:", error);
             showSnackbar('Miras planı iptal edilemedi: ' + error.message, 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const sendInheritanceAmount = async () => {
+        try {
+            setLoading(true);
+            
+            // Toplam miktarı Wei'ye çevirelim
+            const amountInWei = ethers.utils.parseEther(totalAmount);
+            console.log('Gönderilecek toplam miktar (Wei):', amountInWei.toString());
+            
+            const tx = await contract.sendInheritanceAmount({
+                value: amountInWei,
+                gasLimit: 300000
+            });
+            
+            showSnackbar('İşlem gönderiliyor...', 'info');
+            
+            await tx.wait();
+            showSnackbar('Miras miktarı başarıyla gönderildi', 'success');
+            
+            // İşlem başarılı olduktan sonra state'i güncelleyelim
+            await fetchInheritanceDetails();
+            
+        } catch (error) {
+            console.error("Miras gönderme hatası:", error);
+            showSnackbar('Miras gönderilemedi: ' + error.message, 'error');
         } finally {
             setLoading(false);
         }
@@ -625,11 +670,14 @@ const InheritanceManager = () => {
                                             />
                                             <TextField
                                                 fullWidth
-                                                label="Pay (100 = %1)"
+                                                label="Miras Miktarı (ETH)"
+                                                value={beneficiaryAmount}
+                                                onChange={(e) => setBeneficiaryAmount(e.target.value)}
                                                 type="number"
-                                                value={beneficiaryShare}
-                                                onChange={(e) => setBeneficiaryShare(e.target.value)}
+                                                inputProps={{ min: "0", step: "0.000000000000000001" }}
+                                                fullWidth
                                                 margin="normal"
+                                                helperText="ETH cinsinden miktar girin"
                                             />
                                             <Button
                                                 variant="contained"
@@ -671,6 +719,62 @@ const InheritanceManager = () => {
                                         </CardContent>
                                     </Card>
                                 </Grid>
+
+                                <Grid item xs={12} md={6}>
+                                    <Card>
+                                        <CardContent>
+                                            <Button 
+                                                variant="contained" 
+                                                color="secondary" 
+                                                onClick={addToInheritance}
+                                                disabled={loading || !hasInheritance}
+                                            >
+                                                Miras Miktarını Artır (1 ETH)
+                                            </Button>
+                                        </CardContent>
+                                    </Card>
+                                </Grid>
+
+                                {beneficiaries.length > 0 && (
+                                    <>
+                                        <Grid item xs={12}>
+                                            <Card>
+                                                <CardContent>
+                                                    <Typography variant="h6" gutterBottom>
+                                                        Toplam Miras Miktarı: {totalAmount} ETH
+                                                    </Typography>
+                                                    
+                                                    <List>
+                                                        {beneficiaries.map((beneficiary, index) => (
+                                                            <ListItem key={index}>
+                                                                <ListItemText
+                                                                    primary={`Adres: ${beneficiary.address}`}
+                                                                    secondary={`Miras Miktarı: ${beneficiary.amount} ETH`}
+                                                                />
+                                                            </ListItem>
+                                                        ))}
+                                                    </List>
+                                                </CardContent>
+                                            </Card>
+                                        </Grid>
+
+                                        <Grid item xs={12} md={6}>
+                                            <Card>
+                                                <CardContent>
+                                                    <Button
+                                                        variant="contained"
+                                                        color="primary"
+                                                        onClick={sendInheritanceAmount}
+                                                        disabled={loading}
+                                                        sx={{ mt: 2 }}
+                                                    >
+                                                        Miras Miktarını Gönder ({totalAmount} ETH)
+                                                    </Button>
+                                                </CardContent>
+                                            </Card>
+                                        </Grid>
+                                    </>
+                                )}
                             </>
                         )}
                     </Grid>

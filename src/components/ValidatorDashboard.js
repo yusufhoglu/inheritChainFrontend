@@ -26,7 +26,7 @@ const ValidatorDashboard = () => {
   const [validations, setValidations] = useState([]);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
-  const CONTRACT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3"; // Kontrat adresinizi buraya yazın
+  const CONTRACT_ADDRESS = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"; // Kontrat adresinizi buraya yazın
 
   const showSnackbar = (message, severity = 'success') => {
     setSnackbar({ open: true, message, severity });
