@@ -248,46 +248,27 @@ const InheritanceManager = () => {
 
     const createInheritance = async () => {
         try {
-            if (!contract || !account) {
-                showSnackbar('Lütfen önce cüzdanınızı bağlayın!', 'warning');
-                return;
-            }
-
             setLoading(true);
             console.log("Miras planı oluşturuluyor...");
-            console.log("Gönderen hesap:", account);
             
-            // Gas limitini artıralım
             const tx = await contract.createInheritance({
-                from: account,
-                gasLimit: 500000
+                gasLimit: 300000
             });
             
-            console.log("İşlem gönderildi:", tx.hash);
-            showSnackbar('Miras planı oluşturuluyor...', 'info');
+            showSnackbar('İşlem gönderiliyor...', 'info');
             
-            // Transaction receipt'i bekleyelim
-            const receipt = await tx.wait();
-            console.log("İşlem receipt:", receipt);
+            await tx.wait();
             
-            if (receipt.status === 1) {
-                console.log("İşlem başarılı");
-                
-                // Kısa bir gecikme ekleyelim
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                // Miras planını kontrol edelim
-                await checkInheritance();
-                showSnackbar('Miras planı başarıyla oluşturuldu!', 'success');
-            } else {
-                console.error("İşlem başarısız");
-                showSnackbar('Miras planı oluşturulamadı!', 'error');
-            }
+            setHasInheritance(true);
+            showSnackbar('Miras planı başarıyla oluşturuldu', 'success');
+            
+            // Miras detaylarını güncelle
+            await fetchInheritanceDetails();
+            
         } catch (error) {
             console.error("Miras planı oluşturma hatası:", error);
-            if (error.message.includes('Inheritance already exists')) {
-                showSnackbar('Zaten aktif bir miras planınız var!', 'error');
-                await checkInheritance();
+            if (error.error && error.error.message) {
+                showSnackbar('Miras planı oluşturulamadı: ' + error.error.message, 'error');
             } else {
                 showSnackbar('Miras planı oluşturulamadı: ' + error.message, 'error');
             }
@@ -473,20 +454,37 @@ const InheritanceManager = () => {
     const cancelInheritance = async () => {
         try {
             setLoading(true);
+            
+            const isConfirmed = window.confirm(
+                "Miras planını iptal etmek istediğinizden emin misiniz? Bu işlem geri alınamaz ve tüm ETH size geri gönderilecektir."
+            );
+            
+            if (!isConfirmed) {
+                return;
+            }
+
             const tx = await contract.cancelInheritance({
-                gasLimit: 1000000
+                gasLimit: 300000
             });
-            showSnackbar('Miras planı iptal ediliyor...', 'info');
+            
+            showSnackbar('İşlem gönderiliyor...', 'info');
+            
             await tx.wait();
-            await checkInheritance();
-            setInheritanceDetails({
-                beneficiaries: [],
-                validators: [],
-                requiredConfirmations: 0
-            });
-            showSnackbar('Miras planı başarıyla iptal edildi!', 'success');
+            
+            showSnackbar('Miras planı başarıyla iptal edildi', 'success');
+            
+            // State'i sıfırla
+            setHasInheritance(false);
+            setBeneficiaries([]);
+            setTotalAmount('0');
+            setBeneficiaryAddress('');
+            setBeneficiaryAmount('');
+            
+            // Miras detaylarını güncelle
+            await fetchInheritanceDetails();
+            
         } catch (error) {
-            console.error("İptal hatası:", error);
+            console.error("Miras planı iptal hatası:", error);
             showSnackbar('Miras planı iptal edilemedi: ' + error.message, 'error');
         } finally {
             setLoading(false);
